@@ -1,0 +1,43 @@
+# LLaDA 2.0 Configuration for Digital Twin Simulation
+# LLaDA is a masked diffusion language model that runs locally (not via API)
+
+# Model configuration
+model_name: "ML-GSAI/LLaDA-8B-Instruct"  # Update with actual HuggingFace model path when available
+device: "cuda"  # Use "cpu" if no GPU available (will be very slow)
+
+# Generation parameters (LLaDA-specific)
+temperature: 0.2  # Lower temperature for more deterministic responses (good for survey simulation)
+max_new_tokens: 512  # Maximum tokens to generate
+steps: 512  # Diffusion timesteps
+remasking_strategy: "random"  # Remasking strategy for masked diffusion: "random", "entropy", "confidence", etc.
+guidance_scale: 1.0  # Classifier-free guidance scale (1.0 = no guidance, >1.0 = stronger guidance)
+top_p: 0.95  # Nucleus sampling
+top_k: null  # Top-k sampling (null to disable)
+
+# Context management
+max_context_length: 2048  # LLaDA's context limit (input + output)
+
+# Processing options
+max_retries: 10
+num_workers: 1  # Keep at 1 for local model (GPU memory limited)
+force_regenerate: false
+max_personas: 5  # Set to 5 for testing, -1 or null for all
+
+# Input/Output directories
+input_folder_dir: "text_simulation_input"
+output_folder_dir: "text_simulation_output_llada"  # Separate output dir for LLaDA
+
+# System instruction
+system_instruction: |
+  You are an AI assistant. Your task is to answer the 'New Survey Question' as if you are the person described in the 'Persona Profile' (which consists of their past survey responses). 
+  Adhere to the persona by being consistent with their previous answers and stated characteristics. 
+  Follow all instructions provided for the new question carefully regarding the format of your answer.
+
+# LLaDA-specific notes:
+# - Requires transformers and torch (check LLaDA repo for specific versions)
+# - Needs at least 20GB GPU memory (8B model)
+# - Context length is 2048 tokens (prompts will be truncated if longer)
+# - Processing is slower than API models but runs locally (no API costs)
+# - Uses masked diffusion generation instead of autoregressive generation
+# - Model path may need to be updated when LLaDA is officially released on HuggingFace
+

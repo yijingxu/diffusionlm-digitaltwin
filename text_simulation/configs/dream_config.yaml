@@ -1,0 +1,41 @@
+# Dream 7B Configuration for Digital Twin Simulation
+# Dream is a diffusion language model that runs locally (not via API)
+
+# Model configuration
+model_name: "Dream-org/Dream-v0-Instruct-7B"
+device: "cuda"  # Use "cpu" if no GPU available (will be very slow)
+
+# Generation parameters (Dream-specific)
+temperature: 0.2  # Lower temperature for more deterministic responses (good for survey simulation)
+max_new_tokens: 512  # Maximum tokens to generate
+steps: 512  # Diffusion timesteps (max_new_tokens/steps tokens per step)
+alg: "entropy"  # Remasking strategy: "origin", "maskgit_plus", "topk_margin", "entropy"
+alg_temp: 0.0  # Randomness for confidence-based strategies
+top_p: 0.95  # Nucleus sampling
+top_k: null  # Top-k sampling (null to disable)
+
+# Context management
+max_context_length: 2048  # Dream's context limit (input + output)
+
+# Processing options
+max_retries: 10
+num_workers: 1  # Keep at 1 for local model (GPU memory limited)
+force_regenerate: false
+max_personas: 5  # Set to 5 for testing, -1 or null for all
+
+# Input/Output directories
+input_folder_dir: "text_simulation_input"
+output_folder_dir: "text_simulation_output_dream"  # Separate output dir for Dream
+
+# System instruction
+system_instruction: |
+  You are an AI assistant. Your task is to answer the 'New Survey Question' as if you are the person described in the 'Persona Profile' (which consists of their past survey responses). 
+  Adhere to the persona by being consistent with their previous answers and stated characteristics. 
+  Follow all instructions provided for the new question carefully regarding the format of your answer.
+
+# Dream-specific notes:
+# - Requires transformers==4.46.2 and torch==2.5.1
+# - Needs at least 20GB GPU memory
+# - Context length is 2048 tokens (prompts will be truncated if longer)
+# - Processing is slower than API models but runs locally (no API costs)
+
