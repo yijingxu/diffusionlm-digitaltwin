@@ -1,12 +1,18 @@
 """
-Extract Demographics and Vaccine Answer Dataset
+Extract Demographics and Economic Game Answers Dataset
 
 This script extracts demographic information (first 14 questions from Wave 1)
-and the vaccine question answer (QID291) from persona JSON files, creating
-a clean dataset for vaccine prediction tasks.
+and economic game questions (Vaccine, Trust Game, Dictator Game, Ultimatum Game)
+from persona JSON files, creating a clean dataset for prediction tasks.
+
+Questions extracted:
+- Vaccine (QID291): Omission bias vaccine question
+- Ultimatum Game: QID224 (sender), QID225-QID230 (receiver)
+- Trust Game: QID117 (sender), QID118-QID122 (receiver)
+- Dictator Game: QID231 (multiple choice)
 
 Usage:
-    python extract_demographic_vaccine_dataset.py --input_dir ./data/mega_persona_json/mega_persona --output_file ./data/demographic_vaccine_dataset.json
+    python extract_demographic_vaccine_dataset.py --input_dir ./data/mega_persona_json/mega_persona --output_file ./data/demographic_games_dataset.json
 """
 
 import os
@@ -116,6 +122,34 @@ def extract_demographics(questions: List[Dict]) -> Dict[str, Any]:
     return demographics
 
 
+def extract_single_choice_answer(question: Dict) -> Optional[Dict[str, Any]]:
+    """
+    Extract answer from a single choice (MC) question.
+    
+    Returns dict with question_id, question_text, answer_value, answer_text
+    """
+    qid = question.get("QuestionID")
+    question_text = strip_html(question.get("QuestionText", ""))
+    answers = question.get("Answers", {})
+    
+    selected_position = answers.get("SelectedByPosition")
+    selected_text = answers.get("SelectedText")
+    
+    # Handle both single value and list
+    if isinstance(selected_position, list) and len(selected_position) > 0:
+        selected_position = selected_position[0]
+        selected_text = selected_text[0] if isinstance(selected_text, list) and len(selected_text) > 0 else selected_text
+    elif selected_position is None:
+        return None
+    
+    return {
+        "question_id": qid,
+        "question_text": question_text,
+        "answer_value": int(selected_position) if selected_position else None,
+        "answer_text": strip_html(selected_text) if selected_text else None
+    }
+
+
 def extract_vaccine_answer(questions: List[Dict]) -> Optional[Dict[str, Any]]:
     """
     Extract QID291 (vaccine question) answer.
@@ -125,27 +159,66 @@ def extract_vaccine_answer(questions: List[Dict]) -> Optional[Dict[str, Any]]:
     for question in questions:
         qid = question.get("QuestionID")
         if qid == "QID291":
-            question_text = strip_html(question.get("QuestionText", ""))
-            answers = question.get("Answers", {})
-            
-            # Extract answer (Single Choice, 1-4 scale)
-            selected_position = answers.get("SelectedByPosition")
-            selected_text = answers.get("SelectedText")
-            
-            # Handle both single value and list
-            if isinstance(selected_position, list) and len(selected_position) > 0:
-                selected_position = selected_position[0]
-                selected_text = selected_text[0] if isinstance(selected_text, list) and len(selected_text) > 0 else selected_text
-            elif selected_position is None:
-                return None
-            
-            return {
-                "question_id": "QID291",
-                "question_text": question_text,
-                "answer_value": int(selected_position) if selected_position else None,
-                "answer_text": strip_html(selected_text) if selected_text else None
-            }
+            return extract_single_choice_answer(question)
+    return None
+
+
+def extract_ultimatum_game(questions: List[Dict]) -> Dict[str, Any]:
+    """
+    Extract Ultimatum game questions (QID224 sender, QID225-QID230 receiver).
     
+    Returns dict with sender answer and receiver answers for different offers.
+    """
+    result = {
+        "sender": None,  # QID224
+        "receiver": {}   # QID225-QID230
+    }
+    
+    for question in questions:
+        qid = question.get("QuestionID")
+        if qid == "QID224":
+            result["sender"] = extract_single_choice_answer(question)
+        elif qid in ["QID225", "QID226", "QID227", "QID228", "QID229", "QID230"]:
+            answer_data = extract_single_choice_answer(question)
+            if answer_data:
+                result["receiver"][qid] = answer_data
+    
+    return result
+
+
+def extract_trust_game(questions: List[Dict]) -> Dict[str, Any]:
+    """
+    Extract Trust game questions (QID117 sender, QID118-QID122 receiver).
+    
+    Returns dict with sender answer and receiver answers for different amounts.
+    """
+    result = {
+        "sender": None,  # QID117
+        "receiver": {}   # QID118-QID122
+    }
+    
+    for question in questions:
+        qid = question.get("QuestionID")
+        if qid == "QID117":
+            result["sender"] = extract_single_choice_answer(question)
+        elif qid in ["QID118", "QID119", "QID120", "QID121", "QID122"]:
+            answer_data = extract_single_choice_answer(question)
+            if answer_data:
+                result["receiver"][qid] = answer_data
+    
+    return result
+
+
+def extract_dictator_game(questions: List[Dict]) -> Optional[Dict[str, Any]]:
+    """
+    Extract Dictator game question (QID231).
+    
+    QID231 is the dictator game from Wave 3.
+    """
+    for question in questions:
+        qid = question.get("QuestionID")
+        if qid == "QID231":
+            return extract_single_choice_answer(question)
     return None
 
 
@@ -251,27 +324,88 @@ def process_persona_file(json_path: str) -> Optional[Dict[str, Any]]:
     # Extract demographics
     demographics = extract_demographics(questions)
     
-    # Extract vaccine answer
+    # Extract all game questions
     vaccine_answer = extract_vaccine_answer(questions)
+    ultimatum_game = extract_ultimatum_game(questions)
+    trust_game = extract_trust_game(questions)
+    dictator_game = extract_dictator_game(questions)
     
-    # Only return if we have both demographics and vaccine answer
-    if not demographics or vaccine_answer is None:
+    # Only return if we have demographics and at least one game answer
+    if not demographics:
         return None
     
     # Format demographic description
     demographic_description = format_demographic_description(demographics)
     
-    return {
+    result = {
         "persona_id": f"pid_{persona_id}",
         "demographics": demographics,
         "demographic_description": demographic_description,
-        "vaccine_question": {
+    }
+    
+    # Add vaccine question if available
+    if vaccine_answer:
+        result["vaccine_question"] = {
             "question_id": vaccine_answer["question_id"],
             "question_text": vaccine_answer["question_text"],
             "actual_answer": vaccine_answer["answer_value"],
             "actual_answer_text": vaccine_answer["answer_text"]
         }
-    }
+    
+    # Add ultimatum game if available
+    if ultimatum_game.get("sender") or ultimatum_game.get("receiver"):
+        result["ultimatum_game"] = {
+            "sender": {
+                "question_id": ultimatum_game["sender"]["question_id"] if ultimatum_game["sender"] else None,
+                "question_text": ultimatum_game["sender"]["question_text"] if ultimatum_game["sender"] else None,
+                "actual_answer": ultimatum_game["sender"]["answer_value"] if ultimatum_game["sender"] else None,
+                "actual_answer_text": ultimatum_game["sender"]["answer_text"] if ultimatum_game["sender"] else None
+            } if ultimatum_game["sender"] else None,
+            "receiver": {
+                qid: {
+                    "question_id": data["question_id"],
+                    "question_text": data["question_text"],
+                    "actual_answer": data["answer_value"],
+                    "actual_answer_text": data["answer_text"]
+                }
+                for qid, data in ultimatum_game["receiver"].items()
+            } if ultimatum_game["receiver"] else {}
+        }
+    
+    # Add trust game if available
+    if trust_game.get("sender") or trust_game.get("receiver"):
+        result["trust_game"] = {
+            "sender": {
+                "question_id": trust_game["sender"]["question_id"] if trust_game["sender"] else None,
+                "question_text": trust_game["sender"]["question_text"] if trust_game["sender"] else None,
+                "actual_answer": trust_game["sender"]["answer_value"] if trust_game["sender"] else None,
+                "actual_answer_text": trust_game["sender"]["answer_text"] if trust_game["sender"] else None
+            } if trust_game["sender"] else None,
+            "receiver": {
+                qid: {
+                    "question_id": data["question_id"],
+                    "question_text": data["question_text"],
+                    "actual_answer": data["answer_value"],
+                    "actual_answer_text": data["answer_text"]
+                }
+                for qid, data in trust_game["receiver"].items()
+            } if trust_game["receiver"] else {}
+        }
+    
+    # Add dictator game if available
+    if dictator_game:
+        result["dictator_game"] = {
+            "question_id": dictator_game["question_id"],
+            "question_text": dictator_game["question_text"],
+            "actual_answer": dictator_game["answer_value"],
+            "actual_answer_text": dictator_game["answer_text"]
+        }
+    
+    # Only return if we have at least one game answer
+    if not any([vaccine_answer, ultimatum_game.get("sender"), trust_game.get("sender"), dictator_game]):
+        return None
+    
+    return result
 
 
 def extract_dataset(input_dir: str, output_file: str) -> None:
@@ -307,7 +441,7 @@ def extract_dataset(input_dir: str, output_file: str) -> None:
     
     print(f"Successfully extracted data from {len(dataset)} personas.")
     if failed_count > 0:
-        print(f"Failed to extract from {failed_count} personas (missing demographics or vaccine answer).")
+        print(f"Failed to extract from {failed_count} personas (missing demographics or game answers).")
     
     # Save dataset
     output_path = Path(output_file)
