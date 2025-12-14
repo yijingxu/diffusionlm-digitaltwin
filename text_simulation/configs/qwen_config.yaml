@@ -1,21 +1,18 @@
-# Dream 7B Configuration for Digital Twin Simulation
-# Dream is a diffusion language model that runs locally (not via API)
+# Qwen2.5-7B-Instruct Configuration for Digital Twin Simulation
+# Qwen is a standard autoregressive language model that runs locally (not via API)
 
 # Model configuration
-model_name: "Dream-org/Dream-v0-Instruct-7B"
+model_name: "Qwen/Qwen2.5-7B-Instruct"
 device: "cuda"  # Use "cpu" if no GPU available (will be very slow)
 
-# Generation parameters (Dream-specific)
+# Generation parameters (Qwen-specific)
 temperature: 0.2  # Lower temperature for more deterministic responses (good for survey simulation)
 max_new_tokens: 512  # Maximum tokens to generate
-steps: 512  # Diffusion timesteps (max_new_tokens/steps tokens per step)
-alg: "entropy"  # Remasking strategy: "origin", "maskgit_plus", "topk_margin", "entropy"
-alg_temp: 0.0  # Randomness for confidence-based strategies
 top_p: 0.95  # Nucleus sampling
 top_k: null  # Top-k sampling (null to disable)
 
 # Context management
-max_context_length: 2048  # Dream's context limit (input + output)
+max_context_length: 32768  # Qwen2.5 has 32K context limit (input + output)
 
 # Processing options
 max_retries: 10
@@ -25,7 +22,7 @@ max_personas: -1  # Set to -1 or null for all personas, or specify a number to l
 
 # Input/Output directories
 input_folder_dir: "text_simulation_input"
-output_folder_dir: "text_simulation_output_dream_behavioral"  # Separate output dir for Dream behavioral predictions
+output_folder_dir: "text_simulation_output_qwen"  # Separate output dir for Qwen
 
 # System instruction for behavioral predictions
 system_instruction: |
@@ -33,9 +30,10 @@ system_instruction: |
   Given demographic information and psychographic measures (Need for Cognition, Spendthrift/Tightwad, Maximization, Minimalism), predict how a person would respond to behavioral questions. 
   Respond with only a single number corresponding to the option they would choose.
 
-# Dream-specific notes:
-# - Requires transformers==4.46.2 and torch==2.5.1
-# - Needs at least 20GB GPU memory
-# - Context length is 2048 tokens (prompts will be truncated if longer)
+# Qwen-specific notes:
+# - Requires transformers and torch (standard versions)
+# - Needs at least 14GB GPU memory (7B model)
+# - Context length is 32K tokens (much larger than Dream/LLaDA)
 # - Processing is slower than API models but runs locally (no API costs)
+# - Uses standard autoregressive generation (not diffusion-based)
 

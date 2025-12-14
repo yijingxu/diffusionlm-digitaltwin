@@ -1,5 +1,5 @@
 """
-Run LLM Simulations for Behavioral Predictions using Dream 7B Model
+Run LLM Simulations for Behavioral Predictions using Qwen2.5-7B-Instruct Model
 
 This script uses demographics + psychographics to predict:
 - QID34: The Impulse Test
@@ -11,11 +11,11 @@ This script uses demographics + psychographics to predict:
 Input: Demographics + Predictor variables (QID26, QID31, QID239, QID35)
 Output: Predictions for all 5 target variables
 
-It loads a clean dataset with demographics and predictor/predicted variables, then uses Dream 7B 
+It loads a clean dataset with demographics and predictor/predicted variables, then uses Qwen2.5-7B-Instruct 
 to predict behavioral responses.
 
 Usage:
-    python run_LLM_simulations_dream_vaccine.py --config text_simulation/configs/dream_config.yaml --dataset ./data/demographic_games_dataset.csv
+    python run_LLM_simulations_qwen_vaccine.py --config text_simulation/configs/qwen_config.yaml --dataset ./data/demographic_games_dataset.csv
 """
 
 import os
@@ -26,7 +26,7 @@ import yaml
 import asyncio
 from tqdm import tqdm
 from dotenv import load_dotenv
-from llm_helper_dream import DreamLLMConfig, process_prompts_batch_dream
+from llm_helper_qwen import QwenLLMConfig, process_prompts_batch_qwen
 from vaccine_prediction_helpers import (
     get_trust_sender_question_text,
     parse_game_response,
@@ -61,6 +61,11 @@ def load_dataset(dataset_path: str) -> list:
         dataset = []
         with open(dataset_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
+            # Check available columns
+            available_columns = reader.fieldnames
+            print(f"CSV columns found: {', '.join(available_columns)}")
+            
+            vaccine_count = 0
             for row in reader:
                 # Convert to expected format
                 entry = {
@@ -134,11 +139,6 @@ def get_output_path(base_output_dir: str, persona_id: str, csv_mode: bool = Fals
 _predictions_storage = {}
 import threading
 _predictions_lock = threading.Lock()
-_incremental_save_counter = 0
-_incremental_save_lock = threading.Lock()
-_incremental_save_interval = 20  # Save every 20 records
-_incremental_csv_path = None
-_incremental_dataset = None
 
 
 def create_generic_question_prompt_with_context(
@@ -198,7 +198,7 @@ def save_and_verify_game_callback(
     **kwargs
 ) -> bool:
     """
-    Saves the Dream LLM response and verifies it contains a valid prediction.
+    Saves the Qwen LLM response and verifies it contains a valid prediction.
     
     Expected kwargs: base_output_dir, persona_to_entry, question_type
     """
@@ -262,106 +262,12 @@ def save_and_verify_game_callback(
         return False
     
     if not is_valid:
-        print(f"Warning: Invalid {question_type} response for {prompt_id}: {response_text[:100]}")
-    
-    # Incremental CSV save every N records
-    global _incremental_save_counter, _incremental_save_interval, _incremental_csv_path, _incremental_dataset
-    with _incremental_save_lock:
-        _incremental_save_counter += 1
-        if _incremental_save_counter >= _incremental_save_interval and _incremental_csv_path and _incremental_dataset:
-            _save_incremental_csv(_incremental_csv_path, _incremental_dataset)
-            _incremental_save_counter = 0
+        print(f"Warning: Invalid {question_type} response for {prompt_id}: {response_text[:200]}")
+        # Still store the prediction even if invalid, so we can see what the model generated
+        if predicted_answer is None:
+            print(f"  → Could not parse number from response. Full response: {response_text}")
     
     return is_valid
-
-
-def _save_incremental_csv(csv_path: str, dataset: list):
-    """
-    Save predictions to CSV incrementally (appends/updates existing file).
-    Only writes personas that have predictions in _predictions_storage.
-    """
-    fieldnames = [
-        'persona_id',
-        # Predictor variables
-        'qid26_input', 'qid31_input', 'qid239_input', 'qid35_input',
-        # Predicted variables
-        'qid34_predicted', 'qid34_actual', 'qid34_valid',
-        'qid36_predicted', 'qid36_actual', 'qid36_valid',
-        'qid117_predicted', 'qid117_actual', 'qid117_valid',
-        'qid250_predicted', 'qid250_actual', 'qid250_valid',
-        'qid150_predicted', 'qid150_actual', 'qid150_valid'
-    ]
-    
-    # Check if file exists to determine if we need to write header
-    file_exists = os.path.exists(csv_path)
-    
-    # Read existing data if file exists
-    existing_personas = set()
-    if file_exists:
-        try:
-            with open(csv_path, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                existing_personas = {row['persona_id'] for row in reader}
-        except:
-            existing_personas = set()
-    
-    # Collect all rows (existing + new/updated)
-    all_rows = {}
-    
-    # Read existing rows
-    if file_exists and existing_personas:
-        try:
-            with open(csv_path, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    all_rows[row['persona_id']] = row
-        except:
-            pass
-    
-    # Update/add new predictions
-    with _predictions_lock:
-        for entry in dataset:
-            persona_id = entry["persona_id"]
-            if persona_id not in _predictions_storage:
-                continue
-            
-            predictions = _predictions_storage[persona_id]
-            
-            row = {
-                'persona_id': persona_id,
-                # Predictor variables
-                'qid26_input': entry.get('qid26_question', {}).get('actual_answer', ''),
-                'qid31_input': entry.get('qid31_question', {}).get('actual_answer', ''),
-                'qid239_input': entry.get('qid239_question', {}).get('actual_answer', ''),
-                'qid35_input': entry.get('qid35_question', {}).get('actual_answer', ''),
-                # Predicted variables
-                'qid34_predicted': predictions.get('qid34', {}).get('predicted_answer', ''),
-                'qid34_actual': entry.get('qid34_question', {}).get('actual_answer', ''),
-                'qid34_valid': predictions.get('qid34', {}).get('is_valid', False),
-                'qid36_predicted': predictions.get('qid36', {}).get('predicted_answer', ''),
-                'qid36_actual': entry.get('qid36_question', {}).get('actual_answer', ''),
-                'qid36_valid': predictions.get('qid36', {}).get('is_valid', False),
-                'qid117_predicted': predictions.get('qid117', {}).get('predicted_answer', ''),
-                'qid117_actual': entry.get('trust_game', {}).get('sender', {}).get('actual_answer', ''),
-                'qid117_valid': predictions.get('qid117', {}).get('is_valid', False),
-                'qid250_predicted': predictions.get('qid250', {}).get('predicted_answer', ''),
-                'qid250_actual': entry.get('qid250_question', {}).get('actual_answer', ''),
-                'qid250_valid': predictions.get('qid250', {}).get('is_valid', False),
-                'qid150_predicted': predictions.get('qid150', {}).get('predicted_answer', ''),
-                'qid150_actual': entry.get('qid150_question', {}).get('actual_answer', ''),
-                'qid150_valid': predictions.get('qid150', {}).get('is_valid', False),
-            }
-            all_rows[persona_id] = row
-    
-    # Write all rows back to file
-    with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        # Write in sorted order by persona_id for consistency
-        for persona_id in sorted(all_rows.keys()):
-            writer.writerow(all_rows[persona_id])
-    
-    print(f"[Incremental save] Updated CSV with {len(all_rows)} personas")
 
 
 def save_all_predictions(base_output_dir: str, dataset: list, csv_mode: bool = True):
@@ -499,7 +405,7 @@ def save_all_predictions(base_output_dir: str, dataset: list, csv_mode: bool = T
         
         
         # Add metadata
-        output_data["model"] = "Dream-7B"
+        output_data["model"] = "Qwen2.5-7B-Instruct"
         output_data["usage_details"] = {}
         for pred_data in predictions.values():
             if pred_data.get("usage_details"):
@@ -521,7 +427,7 @@ def save_all_predictions(base_output_dir: str, dataset: list, csv_mode: bool = T
 async def run_game_predictions(
     dataset_path: str,
     base_output_dir: str,
-    dream_config_params: dict,
+    qwen_config_params: dict,
     num_workers: int,
     max_retries_for_sequence: int,
     force_regenerate: bool,
@@ -530,15 +436,15 @@ async def run_game_predictions(
     batch_size=None
 ):
     """
-    Run behavioral predictions using Dream 7B model.
+    Run behavioral predictions using Qwen2.5-7B-Instruct model.
     
     Uses: Demographics + Psychographics (QID26, QID31, QID239, QID35) as input
     Predicts: QID34 (Impulse Test), QID36 (Financial Literacy), QID117 (Trust Game), QID250 (Risk Aversion), QID150 (Mental Accounting)
     
     Args:
-        dataset_path: Path to demographic_games_dataset.json
+        dataset_path: Path to demographic_games_dataset.csv
         base_output_dir: Directory to save outputs
-        dream_config_params: Dictionary of Dream configuration parameters
+        qwen_config_params: Dictionary of Qwen configuration parameters
         num_workers: Number of concurrent requests (typically 1 for local model)
         max_retries_for_sequence: Max retries for LLM call + verification
         force_regenerate: Whether to regenerate existing outputs
@@ -556,7 +462,7 @@ async def run_game_predictions(
     print(f"Loaded {len(dataset)} personas from dataset.")
     
     # Use custom system instruction for behavioral predictions
-    system_instruction = dream_config_params.get(
+    system_instruction = qwen_config_params.get(
         'system_instruction', 
         BEHAVIORAL_PREDICTION_SYSTEM_INSTRUCTION
     )
@@ -564,12 +470,6 @@ async def run_game_predictions(
     # Create output directory
     if not os.path.exists(base_output_dir):
         os.makedirs(base_output_dir)
-    
-    # Initialize incremental save settings
-    global _incremental_csv_path, _incremental_dataset, _incremental_save_counter
-    _incremental_csv_path = get_output_path(base_output_dir, "", csv_mode=True)
-    _incremental_dataset = dataset
-    _incremental_save_counter = 0
     
     # Apply start_index and batch_size filtering
     if start_index is not None:
@@ -639,6 +539,7 @@ async def run_game_predictions(
             })
         
         # QID34: Impulse Test
+        # Note: Question text will need to be provided - placeholder for now
         if entry.get("qid34_question") or True:  # Always predict
             question_text = "QID34: The Impulse Test\n[Question text needed - please add from question catalog]"
             prompt_text = create_generic_question_prompt_with_context(
@@ -702,7 +603,7 @@ async def run_game_predictions(
         print(f"Skipped {skipped_due_to_existing_count} personas as their predictions already exist.")
     
     if not all_prompts:
-        print("No new prompts require Dream processing or re-processing.")
+        print("No new prompts require Qwen processing or re-processing.")
         return
     
     # Count prompts by type
@@ -713,7 +614,7 @@ async def run_game_predictions(
     print(f"Found {len(all_prompts)} prompts to process ({len(set(p['persona_id'] for p in all_prompts))} unique personas).")
     for qid, count in qid_counts.items():
         print(f"  - {qid} prompts: {count}")
-    print(f"Processing with Dream 7B (up to {num_workers} concurrent requests).")
+    print(f"Processing with Qwen2.5-7B-Instruct (up to {num_workers} concurrent requests).")
     
     # Create mappings for prompt IDs
     prompt_id_to_question_type = {p["prompt_id"]: p["question_type"] for p in all_prompts}
@@ -727,38 +628,34 @@ async def run_game_predictions(
         "prompt_id_to_persona_id": prompt_id_to_persona_id
     }
     
-    # Create Dream config
-    dream_config = DreamLLMConfig(
-        model_name=dream_config_params.get('model_name', 'Dream-org/Dream-v0-Instruct-7B'),
-        temperature=dream_config_params.get('temperature', 0.2),
-        max_new_tokens=dream_config_params.get('max_new_tokens', 512),
-        steps=dream_config_params.get('steps', 512),
-        alg=dream_config_params.get('alg', 'entropy'),
-        alg_temp=dream_config_params.get('alg_temp', 0.0),
-        top_p=dream_config_params.get('top_p', 0.95),
-        top_k=dream_config_params.get('top_k', None),
+    # Create Qwen config
+    qwen_config = QwenLLMConfig(
+        model_name=qwen_config_params.get('model_name', 'Qwen/Qwen2.5-7B-Instruct'),
+        temperature=qwen_config_params.get('temperature', 0.2),
+        max_new_tokens=qwen_config_params.get('max_new_tokens', 512),
+        top_p=qwen_config_params.get('top_p', 0.95),
+        top_k=qwen_config_params.get('top_k', None),
         system_instruction=system_instruction,
         max_retries=max_retries_for_sequence,
         max_concurrent_requests=num_workers,
-        device=dream_config_params.get('device', 'cuda'),
+        device=qwen_config_params.get('device', 'cuda'),
         verification_callback=save_and_verify_game_callback,
         verification_callback_args=verification_args,
-        max_context_length=dream_config_params.get('max_context_length', 2048)
+        max_context_length=qwen_config_params.get('max_context_length', 32768)
     )
     
     # Process prompts in batches by persona to ensure all questions for a persona are processed
-    # Convert to format expected by process_prompts_batch_dream
+    # Convert to format expected by process_prompts_batch_qwen
     prompts_for_batch = [(p["prompt_id"], p["prompt_text"]) for p in all_prompts]
     
     # Process all prompts (callback will store predictions in _predictions_storage)
-    final_results = await process_prompts_batch_dream(
+    final_results = await process_prompts_batch_qwen(
         prompts_for_batch,
-        dream_config,
-        desc="Dream 7B Game Predictions"
+        qwen_config,
+        desc="Qwen2.5-7B-Instruct Game Predictions"
     )
     
-    # Final save: Save all collected predictions to CSV file
-    # (This ensures we get everything, even if incremental saves missed some)
+    # Save all collected predictions to CSV file (fast, single file write)
     save_all_predictions(base_output_dir, dataset, csv_mode=True)
     
     # Count successes and failures
@@ -790,7 +687,7 @@ async def run_game_predictions(
         prediction_counts[qid] = sum(1 for e in dataset if e.get('persona_id') in _predictions_storage and qid in _predictions_storage[e['persona_id']])
         valid_counts[qid] = sum(1 for e in dataset if e.get('persona_id') in _predictions_storage and _predictions_storage[e['persona_id']].get(qid, {}).get('is_valid', False))
     
-    print(f"\nDream 7B behavioral prediction run complete.")
+    print(f"\nQwen2.5-7B-Instruct behavioral prediction run complete.")
     print(f"  Successfully processed and verified: {successful_count}")
     print(f"  Failed permanently after all retries: {failed_count}")
     print(f"\n  Prediction Summary:")
@@ -809,7 +706,7 @@ async def run_game_predictions(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run Dream 7B predictions for behavioral variables using demographics + psychographics."
+        description="Run Qwen2.5-7B-Instruct predictions for behavioral variables using demographics + psychographics."
     )
     parser.add_argument(
         "--config", 
@@ -841,7 +738,7 @@ if __name__ == "__main__":
     
     config_values = load_config(args.config)
     
-    base_output_dir = config_values.get('output_folder_dir', './text_simulation_output_dream_vaccine')
+    base_output_dir = config_values.get('output_folder_dir', './text_simulation_output_qwen_vaccine')
     base_output_dir = os.path.join("./text_simulation", base_output_dir)
     
     num_workers = config_values.get('num_workers', 1)  # Default to 1 for local model
@@ -858,24 +755,22 @@ if __name__ == "__main__":
         if max_personas == -1:
             max_personas = None
     
-    # Get Dream-specific config
-    dream_config_dict = config_values.get('dream_config', {})
-    if not dream_config_dict:
+    # Get Qwen-specific config
+    qwen_config_dict = config_values.get('qwen_config', {})
+    if not qwen_config_dict:
         # Fallback to top-level config
-        dream_config_dict = {
-            'model_name': config_values.get('model_name', 'Dream-org/Dream-v0-Instruct-7B'),
+        qwen_config_dict = {
+            'model_name': config_values.get('model_name', 'Qwen/Qwen2.5-7B-Instruct'),
             'temperature': config_values.get('temperature', 0.2),
             'max_new_tokens': config_values.get('max_new_tokens', 512),
-            'steps': config_values.get('steps', 512),
-            'alg': config_values.get('alg', 'entropy'),
             'system_instruction': config_values.get('system_instruction'),
         }
     
     if not args.dataset:
         raise ValueError("--dataset must be specified.")
     
-    print(f"Starting Dream 7B game predictions from: {args.config} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Model: {dream_config_dict.get('model_name', 'Dream-org/Dream-v0-Instruct-7B')}")
+    print(f"Starting Qwen2.5-7B-Instruct game predictions from: {args.config} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Model: {qwen_config_dict.get('model_name', 'Qwen/Qwen2.5-7B-Instruct')}")
     print(f"Dataset: {args.dataset}")
     print(f"Output directory: {base_output_dir}")
     print(f"Number of concurrent requests: {num_workers} (local model - typically 1)")
@@ -890,7 +785,7 @@ if __name__ == "__main__":
     asyncio.run(run_game_predictions(
         dataset_path=args.dataset,
         base_output_dir=base_output_dir,
-        dream_config_params=dream_config_dict,
+        qwen_config_params=qwen_config_dict,
         num_workers=num_workers,
         max_retries_for_sequence=max_retries_for_sequence,
         force_regenerate=force_regenerate,
